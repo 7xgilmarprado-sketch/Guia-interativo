@@ -66,12 +66,12 @@ const SYSTEM_PROMPT = `Você é um assistente de acessibilidade para pessoas ceg
 Você está recebendo um fluxo de vídeo contínuo da câmera do celular do usuário e áudio do microfone.
 
 Regras CRÍTICAS:
-1. Fale APENAS se houver uma mudança significativa no ambiente (novo obstáculo, pessoa se aproximando, mudança de cenário) OU se o usuário fizer uma pergunta por voz.
-2. Se o ambiente estiver igual ao anterior e o usuário não falar nada, NÃO FALE NADA. Fique em silêncio absoluto.
-3. Quando falar, seja extremamente conciso e direto. Use frases curtas.
-4. Priorize informações de segurança e navegação (degraus, portas, buracos, pessoas).
-5. Diga a posição dos objetos (à esquerda, direita, frente).
-6. Nunca use jargões visuais complexos, seja prático.`;
+1. Você será solicitado a descrever o ambiente frequentemente.
+2. Quando solicitado, responda com no MÁXIMO UMA FRASE CURTA E DIRETA. Exemplo: "Caminho livre", "Cadeira à direita", "Pessoa se aproximando de frente".
+3. Priorize informações de segurança e navegação (degraus, portas, buracos, pessoas).
+4. Diga a posição dos objetos (à esquerda, direita, frente).
+5. Nunca use jargões visuais complexos, seja prático.
+6. Se o usuário fizer uma pergunta específica pelo microfone, responda a pergunta de forma clara e concisa.`;
 
 export default function App() {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -171,6 +171,21 @@ export default function App() {
                     session.sendRealtimeInput({
                       media: { data: base64Image, mimeType: 'image/jpeg' }
                     });
+
+                    // Solicita a descrição automaticamente a cada 2 segundos,
+                    // mas apenas se o assistente não estiver falando no momento,
+                    // para evitar que os áudios se atropelem.
+                    if (audioStreamerRef.current && audioStreamerRef.current.activeSources.length === 0) {
+                      (session as any).send({
+                        clientContent: {
+                          turns: [{
+                            role: "user",
+                            parts: [{ text: "Descreva o que está na minha frente agora em uma frase muito curta." }]
+                          }],
+                          turnComplete: true
+                        }
+                      });
+                    }
                   });
                 }
               }
