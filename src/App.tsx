@@ -8,7 +8,12 @@ class AudioStreamer {
   activeSources: AudioBufferSourceNode[] = [];
 
   constructor() {
-    this.audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
+    const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+    try {
+      this.audioCtx = new AudioContextClass({ sampleRate: 24000 });
+    } catch (e) {
+      this.audioCtx = new AudioContextClass();
+    }
     this.nextPlayTime = this.audioCtx.currentTime;
   }
 
@@ -84,6 +89,10 @@ export default function App() {
     setError('');
 
     try {
+      if (!process.env.GEMINI_API_KEY) {
+        throw new Error("A chave da API do Gemini (GEMINI_API_KEY) não está configurada.");
+      }
+
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { facingMode: 'environment' },
         audio: true
@@ -111,7 +120,14 @@ export default function App() {
             setIsConnecting(false);
             setIsActive(true);
             
-            const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
+            const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+            let audioCtx: AudioContext;
+            try {
+              audioCtx = new AudioContextClass({ sampleRate: 16000 });
+            } catch (e) {
+              audioCtx = new AudioContextClass();
+            }
+
             const source = audioCtx.createMediaStreamSource(stream);
             const processor = audioCtx.createScriptProcessor(4096, 1, 1);
 
@@ -183,7 +199,7 @@ export default function App() {
           },
           onerror: (err) => {
             console.error("Live API Error:", err);
-            setError("Erro na conexão com o assistente.");
+            setError(`Erro na conexão: ${err.message || "Falha ao comunicar com o assistente."}`);
             stopAssistant();
           },
           onclose: () => {
@@ -192,9 +208,15 @@ export default function App() {
         }
       });
 
-    } catch (err) {
+      sessionPromise.catch(err => {
+        console.error("Live API Connection Error:", err);
+        setError(`Erro ao conectar: ${err.message || "Falha ao iniciar sessão com o Gemini."}`);
+        stopAssistant();
+      });
+
+    } catch (err: any) {
       console.error("Setup error:", err);
-      setError("Não foi possível acessar câmera/microfone ou iniciar o assistente.");
+      setError(`Erro: ${err.message || "Não foi possível iniciar o assistente."}`);
       setIsConnecting(false);
     }
   };
