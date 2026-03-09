@@ -134,8 +134,13 @@ export default function App() {
             processor.onaudioprocess = (e) => {
               const float32 = e.inputBuffer.getChannelData(0);
               const pcm16 = new Int16Array(float32.length);
+              
+              // Verifica se o assistente está falando no momento
+              const isSpeaking = audioStreamerRef.current && audioStreamerRef.current.activeSources.length > 0;
+
               for (let i = 0; i < float32.length; i++) {
-                pcm16[i] = Math.max(-1, Math.min(1, float32[i])) * 32767;
+                // Se estiver falando, envia silêncio (0) para não interromper. Caso contrário, envia o áudio do microfone.
+                pcm16[i] = isSpeaking ? 0 : Math.max(-1, Math.min(1, float32[i])) * 32767;
               }
               const bytes = new Uint8Array(pcm16.buffer);
               let binary = '';
