@@ -1,0 +1,5 @@
+{
+  "name": "Assistente de Visão",
+  "description": "Assistente de acessibilidade que descreve o ambiente usando a câmera do celular.",
+  "requestFramePermissions": ["camera", "microphone"]
+}
