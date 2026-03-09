@@ -181,14 +181,12 @@ export default function App() {
                     // mas apenas se o assistente não estiver falando no momento,
                     // para evitar que os áudios se atropelem.
                     if (audioStreamerRef.current && audioStreamerRef.current.activeSources.length === 0) {
-                      (session as any).send({
-                        clientContent: {
-                          turns: [{
-                            role: "user",
-                            parts: [{ text: "Descreva o que está na minha frente agora em uma frase muito curta." }]
-                          }],
-                          turnComplete: true
-                        }
+                      session.sendClientContent({
+                        turns: [{
+                          role: "user",
+                          parts: [{ text: "Descreva o que está na minha frente agora em uma frase muito curta." }]
+                        }],
+                        turnComplete: true
                       });
                     }
                   });
