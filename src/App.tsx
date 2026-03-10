@@ -80,14 +80,22 @@ export default function App() {
   const [isActive, setIsActive] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
   const [error, setError] = useState<string>('');
+  const [logs, setLogs] = useState<string[]>([]);
   
+  const addLog = (msg: string) => {
+    setLogs(prev => [msg, ...prev].slice(0, 5));
+  };
+
   const audioStreamerRef = useRef<AudioStreamer | null>(null);
   const cleanupRef = useRef<(() => void) | null>(null);
   const isGeneratingRef = useRef(false);
+  const setupCompleteRef = useRef(false);
 
   const startAssistant = async () => {
     setIsConnecting(true);
     setError('');
+    setLogs([]);
+    setupCompleteRef.current = false;
 
     try {
       if (!process.env.GEMINI_API_KEY) {
@@ -110,7 +118,7 @@ export default function App() {
       const sessionPromise = ai.live.connect({
         model: "gemini-2.5-flash-native-audio-preview-09-2025",
         config: {
-          responseModalities: [Modality.AUDIO],
+          responseModalities: ["AUDIO" as any],
           speechConfig: {
             voiceConfig: { prebuiltVoiceConfig: { voiceName: "Zephyr" } },
           },
@@ -118,99 +126,123 @@ export default function App() {
         },
         callbacks: {
           onopen: () => {
-            setIsConnecting(false);
-            setIsActive(true);
-            
-            const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
-            let audioCtx: AudioContext;
             try {
-              audioCtx = new AudioContextClass({ sampleRate: 16000 });
-            } catch (e) {
-              audioCtx = new AudioContextClass();
-            }
-
-            const source = audioCtx.createMediaStreamSource(stream);
-            const processor = audioCtx.createScriptProcessor(4096, 1, 1);
-
-            processor.onaudioprocess = (e) => {
-              const float32 = e.inputBuffer.getChannelData(0);
-              const pcm16 = new Int16Array(float32.length);
+              addLog("Conexão aberta com sucesso.");
+              setIsConnecting(false);
+              setIsActive(true);
               
-              // Verifica se o assistente está falando no momento
-              const isSpeaking = audioStreamerRef.current && audioStreamerRef.current.activeSources.length > 0;
-
-              for (let i = 0; i < float32.length; i++) {
-                // Se estiver falando, envia silêncio (0) para não interromper. Caso contrário, envia o áudio do microfone.
-                pcm16[i] = isSpeaking ? 0 : Math.max(-1, Math.min(1, float32[i])) * 32767;
+              const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+              let audioCtx: AudioContext;
+              try {
+                audioCtx = new AudioContextClass({ sampleRate: 16000 });
+              } catch (e) {
+                audioCtx = new AudioContextClass();
               }
-              const bytes = new Uint8Array(pcm16.buffer);
-              let binary = '';
-              for (let i = 0; i < bytes.byteLength; i++) {
-                binary += String.fromCharCode(bytes[i]);
-              }
-              const base64 = btoa(binary);
-              
-              sessionPromise.then(session => {
-                session.sendRealtimeInput({
-                  media: { data: base64, mimeType: 'audio/pcm;rate=16000' }
-                });
-              });
-            };
 
-            source.connect(processor);
-            processor.connect(audioCtx.destination);
+              const source = audioCtx.createMediaStreamSource(stream);
+              const processor = audioCtx.createScriptProcessor(4096, 1, 1);
 
-            const videoInterval = setInterval(() => {
-              if (videoRef.current && canvasRef.current) {
-                const video = videoRef.current;
-                const canvas = canvasRef.current;
-                if (video.videoWidth === 0) return;
+              processor.onaudioprocess = (e) => {
+                const float32 = e.inputBuffer.getChannelData(0);
+                const pcm16 = new Int16Array(float32.length);
                 
-                canvas.width = video.videoWidth;
-                canvas.height = video.videoHeight;
-                const ctx = canvas.getContext('2d');
-                if (ctx) {
-                  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-                  const base64Image = canvas.toDataURL('image/jpeg', 0.5).split(',')[1];
-                  
+                // Verifica se o assistente está falando no momento
+                const isSpeaking = audioStreamerRef.current && audioStreamerRef.current.activeSources.length > 0;
+
+                for (let i = 0; i < float32.length; i++) {
+                  // Se estiver falando, envia silêncio (0) para não interromper. Caso contrário, envia o áudio do microfone.
+                  pcm16[i] = isSpeaking ? 0 : Math.max(-1, Math.min(1, float32[i])) * 32767;
+                }
+                const bytes = new Uint8Array(pcm16.buffer);
+                let binary = '';
+                for (let i = 0; i < bytes.byteLength; i++) {
+                  binary += String.fromCharCode(bytes[i]);
+                }
+                const base64 = btoa(binary);
+                
+                if (setupCompleteRef.current) {
                   sessionPromise.then(session => {
                     session.sendRealtimeInput({
-                      media: { data: base64Image, mimeType: 'image/jpeg' }
+                      media: { data: base64, mimeType: 'audio/pcm;rate=16000' }
                     });
-
-                    // Solicita a descrição automaticamente a cada 2 segundos,
-                    // mas apenas se o assistente não estiver falando no momento,
-                    // para evitar que os áudios se atropelem.
-                    if (audioStreamerRef.current && audioStreamerRef.current.activeSources.length === 0 && !isGeneratingRef.current) {
-                      isGeneratingRef.current = true;
-                      session.sendClientContent({
-                        turns: "Descreva o que está na minha frente agora em uma frase muito curta.",
-                        turnComplete: true
-                      });
-                    }
                   });
                 }
-              }
-            }, 2000);
+              };
 
-            cleanupRef.current = () => {
-              clearInterval(videoInterval);
-              processor.disconnect();
-              source.disconnect();
-              if (audioCtx.state !== 'closed') audioCtx.close();
+              source.connect(processor);
+              processor.connect(audioCtx.destination);
+
+              const videoInterval = setInterval(() => {
+                if (videoRef.current && canvasRef.current && setupCompleteRef.current) {
+                  const video = videoRef.current;
+                  const canvas = canvasRef.current;
+                  if (video.videoWidth === 0) return;
+                  
+                  canvas.width = video.videoWidth;
+                  canvas.height = video.videoHeight;
+                  const ctx = canvas.getContext('2d');
+                  if (ctx) {
+                    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                    const base64Image = canvas.toDataURL('image/jpeg', 0.5).split(',')[1];
+                    
+                    sessionPromise.then(session => {
+                      session.sendRealtimeInput({
+                        media: { data: base64Image, mimeType: 'image/jpeg' }
+                      });
+
+                      // Solicita a descrição automaticamente a cada 2 segundos,
+                      // mas apenas se o assistente não estiver falando no momento,
+                      // para evitar que os áudios se atropelem.
+                      if (audioStreamerRef.current && audioStreamerRef.current.activeSources.length === 0 && !isGeneratingRef.current) {
+                        isGeneratingRef.current = true;
+                        addLog("Enviando pedido de descrição...");
+                        session.sendClientContent({
+                          turns: "Descreva o que está na minha frente agora em uma frase muito curta.",
+                          turnComplete: true
+                        });
+                      }
+                    });
+                  }
+                }
+              }, 2000);
+
+              cleanupRef.current = () => {
+                clearInterval(videoInterval);
+                processor.disconnect();
+                source.disconnect();
+                if (audioCtx.state !== 'closed') audioCtx.close();
+                stream.getTracks().forEach(t => t.stop());
+                sessionPromise.then(session => session.close());
+                if (audioStreamerRef.current) {
+                  audioStreamerRef.current.stop();
+                }
+              };
+            } catch (err: any) {
+              console.error("Error in onopen:", err);
+              addLog(`Erro no onopen: ${err.message}`);
+              setError(`Erro ao iniciar áudio: ${err.message}`);
               stream.getTracks().forEach(t => t.stop());
-              sessionPromise.then(session => session.close());
-              if (audioStreamerRef.current) {
-                audioStreamerRef.current.stop();
-              }
-            };
+              stopAssistant();
+            }
           },
           onmessage: async (message: LiveServerMessage) => {
+            if (message.setupComplete) {
+              setupCompleteRef.current = true;
+              addLog("Setup concluído pelo servidor.");
+            }
             if (message.serverContent?.modelTurn) {
               isGeneratingRef.current = true;
+              addLog("Recebendo áudio do assistente...");
             }
             if (message.serverContent?.turnComplete) {
               isGeneratingRef.current = false;
+              addLog("Assistente terminou de falar.");
+            }
+            if (message.serverContent?.interrupted) {
+              addLog("Assistente interrompido.");
+            }
+            if (message.goAway) {
+              addLog("Servidor enviou GoAway.");
             }
             const base64Audio = message.serverContent?.modelTurn?.parts[0]?.inlineData?.data;
             if (base64Audio && audioStreamerRef.current) {
@@ -221,12 +253,18 @@ export default function App() {
               isGeneratingRef.current = false;
             }
           },
-          onerror: (err) => {
+          onerror: (err: any) => {
             console.error("Live API Error:", err);
+            addLog(`Erro: ${err.message || JSON.stringify(err)}`);
             setError(`Erro na conexão: ${err.message || "Falha ao comunicar com o assistente."}`);
             stopAssistant();
           },
-          onclose: () => {
+          onclose: (e: any) => {
+            console.log("Connection closed", e);
+            addLog(`Conexão fechada. Code: ${e?.code}, Reason: ${e?.reason}`);
+            if (e && e.code && e.code !== 1000) {
+              setError(`Conexão encerrada pelo servidor (Código: ${e.code}, Motivo: ${e.reason}).`);
+            }
             stopAssistant();
           }
         }
@@ -300,6 +338,14 @@ export default function App() {
                   <p className="text-lg font-medium">Ouvindo e observando...</p>
                   <p className="text-zinc-400 text-sm">Pode fazer perguntas ou apenas apontar a câmera.</p>
                 </div>
+              </div>
+            )}
+
+            {logs.length > 0 && (
+              <div className="bg-black/50 backdrop-blur-sm border border-zinc-800 text-zinc-300 p-3 rounded-xl mb-4 text-xs font-mono">
+                {logs.map((log, i) => (
+                  <div key={i} className="truncate">{log}</div>
+                ))}
               </div>
             )}
           </div>
