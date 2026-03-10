@@ -66,8 +66,8 @@ const SYSTEM_PROMPT = `Você é um assistente de acessibilidade para pessoas ceg
 Você está recebendo um fluxo de vídeo contínuo da câmera do celular do usuário e áudio do microfone.
 
 Regras CRÍTICAS:
-1. Você será solicitado a descrever o ambiente frequentemente.
-2. Quando solicitado, responda com no MÁXIMO UMA FRASE CURTA E DIRETA. Exemplo: "Caminho livre", "Cadeira à direita", "Pessoa se aproximando de frente".
+1. Descreva proativamente o ambiente que você está vendo na câmera. Se algo mudar, avise o usuário imediatamente.
+2. Responda com no MÁXIMO UMA FRASE CURTA E DIRETA. Exemplo: "Caminho livre", "Cadeira à direita", "Pessoa se aproximando de frente".
 3. Priorize informações de segurança e navegação (degraus, portas, buracos, pessoas).
 4. Diga a posição dos objetos (à esquerda, direita, frente).
 5. Nunca use jargões visuais complexos, seja prático.
@@ -109,6 +109,11 @@ export default function App() {
 
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
+        try {
+          await videoRef.current.play();
+        } catch (e) {
+          console.warn("Auto-play prevented, waiting for interaction", e);
+        }
       }
 
       audioStreamerRef.current = new AudioStreamer();
@@ -176,35 +181,40 @@ export default function App() {
                 if (videoRef.current && canvasRef.current && setupCompleteRef.current) {
                   const video = videoRef.current;
                   const canvas = canvasRef.current;
-                  if (video.videoWidth === 0) return;
+                  if (video.videoWidth === 0 || video.videoHeight === 0) return;
                   
-                  canvas.width = video.videoWidth;
-                  canvas.height = video.videoHeight;
+                  // Redimensiona a imagem para no máximo 640px para enviar mais rápido e não sobrecarregar a rede
+                  const MAX_DIMENSION = 640;
+                  let width = video.videoWidth;
+                  let height = video.videoHeight;
+                  
+                  if (width > height) {
+                    if (width > MAX_DIMENSION) {
+                      height = Math.round((height * MAX_DIMENSION) / width);
+                      width = MAX_DIMENSION;
+                    }
+                  } else {
+                    if (height > MAX_DIMENSION) {
+                      width = Math.round((width * MAX_DIMENSION) / height);
+                      height = MAX_DIMENSION;
+                    }
+                  }
+                  
+                  canvas.width = width;
+                  canvas.height = height;
                   const ctx = canvas.getContext('2d');
                   if (ctx) {
-                    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                    ctx.drawImage(video, 0, 0, width, height);
                     const base64Image = canvas.toDataURL('image/jpeg', 0.5).split(',')[1];
                     
                     sessionPromise.then(session => {
                       session.sendRealtimeInput({
                         media: { data: base64Image, mimeType: 'image/jpeg' }
                       });
-
-                      // Solicita a descrição automaticamente a cada 2 segundos,
-                      // mas apenas se o assistente não estiver falando no momento,
-                      // para evitar que os áudios se atropelem.
-                      if (audioStreamerRef.current && audioStreamerRef.current.activeSources.length === 0 && !isGeneratingRef.current) {
-                        isGeneratingRef.current = true;
-                        addLog("Enviando pedido de descrição...");
-                        session.sendClientContent({
-                          turns: "Descreva o que está na minha frente agora em uma frase muito curta.",
-                          turnComplete: true
-                        });
-                      }
                     });
                   }
                 }
-              }, 2000);
+              }, 1000); // Envia 1 frame por segundo
 
               cleanupRef.current = () => {
                 clearInterval(videoInterval);
