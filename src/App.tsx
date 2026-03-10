@@ -83,6 +83,7 @@ export default function App() {
   
   const audioStreamerRef = useRef<AudioStreamer | null>(null);
   const cleanupRef = useRef<(() => void) | null>(null);
+  const isGeneratingRef = useRef(false);
 
   const startAssistant = async () => {
     setIsConnecting(true);
@@ -180,12 +181,10 @@ export default function App() {
                     // Solicita a descrição automaticamente a cada 2 segundos,
                     // mas apenas se o assistente não estiver falando no momento,
                     // para evitar que os áudios se atropelem.
-                    if (audioStreamerRef.current && audioStreamerRef.current.activeSources.length === 0) {
+                    if (audioStreamerRef.current && audioStreamerRef.current.activeSources.length === 0 && !isGeneratingRef.current) {
+                      isGeneratingRef.current = true;
                       session.sendClientContent({
-                        turns: [{
-                          role: "user",
-                          parts: [{ text: "Descreva o que está na minha frente agora em uma frase muito curta." }]
-                        }],
+                        turns: "Descreva o que está na minha frente agora em uma frase muito curta.",
                         turnComplete: true
                       });
                     }
@@ -207,12 +206,19 @@ export default function App() {
             };
           },
           onmessage: async (message: LiveServerMessage) => {
+            if (message.serverContent?.modelTurn) {
+              isGeneratingRef.current = true;
+            }
+            if (message.serverContent?.turnComplete) {
+              isGeneratingRef.current = false;
+            }
             const base64Audio = message.serverContent?.modelTurn?.parts[0]?.inlineData?.data;
             if (base64Audio && audioStreamerRef.current) {
               audioStreamerRef.current.playPcm16(base64Audio);
             }
             if (message.serverContent?.interrupted && audioStreamerRef.current) {
               audioStreamerRef.current.interrupt();
+              isGeneratingRef.current = false;
             }
           },
           onerror: (err) => {
